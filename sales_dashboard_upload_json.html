@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Interactive Sales Dashboard (Upload JSON)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    :root{
+      --bg:#0f172a;
+      --card:#111827;
+      --muted:#94a3b8;
+      --text:#e5e7eb;
+      --accent:#22d3ee;
+      --accent2:#a78bfa;
+      --good:#4ade80;
+      --warn:#facc15;
+      --bad:#fb7185;
+      --border:#1f2937;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background:linear-gradient(180deg,#0b1220 0%, #0f172a 100%) fixed; color:var(--text);
+    }
+    header{
+      padding:20px 24px; border-bottom:1px solid var(--border); backdrop-filter: blur(6px);
+      position: sticky; top:0; z-index: 10; background: rgba(15,23,42,.8);
+    }
+    h1{margin:0; font-weight:700; letter-spacing:.2px}
+    .sub{color:var(--muted); margin-top:6px; font-size:14px}
+    .bar{display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:14px}
+    .uploader, .filters{
+      background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px 14px; display:flex; gap:10px; align-items:center;
+    }
+    input[type=file]{
+      color:var(--text); border:1px dashed var(--border); padding:8px 10px; border-radius:10px; background:#0b1020;
+    }
+    button, select{
+      background:#0b1020; color:var(--text); border:1px solid var(--border); padding:8px 10px; border-radius:10px; cursor:pointer;
+    }
+    button:hover, select:hover{border-color:#334155}
+    .grid{
+      padding:18px 24px; display:grid; gap:16px; grid-template-columns: repeat(12, 1fr);
+    }
+    .card{
+      background:var(--card); border:1px solid var(--border); border-radius:16px; padding:14px 14px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.25);
+    }
+    .kpis{grid-column: span 12; display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px}
+    .kpi{padding:14px 16px; border-radius:14px; border:1px solid var(--border); background:#0b1020}
+    .kpi .label{color:var(--muted); font-size:12px}
+    .kpi .value{font-size:24px; font-weight:700; margin-top:6px}
+    .row{display:grid; grid-template-columns: repeat(12, 1fr); gap:16px}
+    .span-6{grid-column: span 6}
+    .span-12{grid-column: span 12}
+    .hint{color:var(--muted); font-size:12px; margin-top:6px}
+    .footer{color:var(--muted); font-size:12px; padding:10px 24px 24px}
+    .pill{font-size:11px; color:#081018; background: var(--accent); padding:2px 8px; border-radius:999px; font-weight:700; margin-left:8px}
+    .pill2{background: var(--accent2); color:#0b0f1a}
+    .inline{display:flex; align-items:center; gap:6px}
+    .sep{height:1px; background:var(--border); margin:10px 0}
+    @media (max-width: 1100px){
+      .kpis{grid-template-columns: repeat(2, minmax(0,1fr))}
+      .span-6{grid-column: span 12}
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 class="inline">Sales Performance Dashboard <span class="pill">Plotly</span><span class="pill pill2">JSON Upload</span></h1>
+    <div class="sub">Upload your sales JSON. Use the filters. Explore time, product mix, geography, customers, and pricing impact.</div>
+    <div class="bar">
+      <div class="uploader">
+        <input id="fileInput" type="file" accept=".json,application/json" />
+        <button id="loadSampleBtn" title="Load a tiny built-in sample to test the dashboard">Use sample data</button>
+      </div>
+      <div class="filters">
+        <span style="color:var(--muted); font-size:12px; margin-right:6px;">Filters</span>
+        <select id="yearFilter"><option value="">Year: All</option></select>
+        <select id="regionFilter"><option value="">Region: All</option></select>
+        <select id="categoryFilter"><option value="">Category: All</option></select>
+        <button id="resetBtn" title="Clear all filters">Reset</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- KPIs -->
+    <section class="kpis card" id="kpiRow">
+      <div class="kpi">
+        <div class="label">Total Sales</div>
+        <div class="value" id="kpiSales">—</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Total Profit</div>
+        <div class="value" id="kpiProfit">—</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Profit Margin</div>
+        <div class="value" id="kpiMargin">—</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Orders</div>
+        <div class="value" id="kpiOrders">—</div>
+      </div>
+    </section>
+
+    <!-- Row 1: Time + Category -->
+    <section class="row span-12">
+      <div class="card span-6">
+        <div class="inline"><strong>Sales & Profit Over Time</strong></div>
+        <div id="timeSeries" style="height:360px;"></div>
+        <div class="hint">Aggregated by month. Toggle via legend.</div>
+      </div>
+      <div class="card span-6">
+        <div class="inline"><strong>Sales by Category / Sub-Category</strong></div>
+        <div id="categoryBars" style="height:360px;"></div>
+        <div class="hint">Click bars to drill into sub-categories (back via legend).</div>
+      </div>
+    </section>
+
+    <!-- Row 2: Map + Pareto -->
+    <section class="row span-12">
+      <div class="card span-6">
+        <div class="inline"><strong>Regional Sales (USA)</strong></div>
+        <div id="usaMap" style="height:420px;"></div>
+        <div class="hint">Choropleth by state. Hover for sales, profit, and margin.</div>
+      </div>
+      <div class="card span-6">
+        <div class="inline"><strong>Top Customers (Pareto)</strong></div>
+        <div id="pareto" style="height:420px;"></div>
+        <div class="hint">Bar = sales by customer; line = cumulative %.</div>
+      </div>
+    </section>
+
+    <!-- Row 3: Scatter -->
+    <section class="row span-12">
+      <div class="card span-12">
+        <div class="inline"><strong>Profit vs. Discount</strong></div>
+        <div id="scatter" style="height:420px;"></div>
+        <div class="hint">Marker size scales with Sales. Helps spot margin erosion from discounting.</div>
+      </div>
+    </section>
+  </main>
+
+  <div class="footer">
+    <div class="sep"></div>
+    <div><strong>Data requirements.</strong> Expected fields (flexible names): Order Date, Sales, Profit, Discount, Category, Sub-Category, Region, State, City, Customer Name, Segment. Dates parse best as ISO strings (e.g., 2019-07-15) or mm/dd/yyyy.</div>
+  </div>
+
+<script>
+(() => {
+  const FIELD_ALIASES = {
+    orderDate: ['order date','order_date','orderdate','date','order_dt','orderdate (dd/mm/yyyy)'],
+    sales: ['sales','sale','amount','revenue'],
+    profit: ['profit','margin$','net','net profit'],
+    discount: ['discount','disc','discount%','discount pct','discount rate'],
+    category: ['category','cat'],
+    subCategory: ['sub-category','subcategory','sub category','subcat'],
+    region: ['region','sales region','geo region'],
+    state: ['state','province','us state'],
+    city: ['city','town'],
+    customer: ['customer name','customer','client','account'],
+    segment: ['segment','cust segment','customer segment','market segment'],
+    orderId: ['order id','orderid','order no','order number','order_nbr']
+  };
+
+  const STATE_ABBR = {
+    "Alabama":"AL","Alaska":"AK","Arizona":"AZ","Arkansas":"AR","California":"CA","Colorado":"CO","Connecticut":"CT",
+    "Delaware":"DE","District of Columbia":"DC","Florida":"FL","Georgia":"GA","Hawaii":"HI","Idaho":"ID","Illinois":"IL",
+    "Indiana":"IN","Iowa":"IA","Kansas":"KS","Kentucky":"KY","Louisiana":"LA","Maine":"ME","Maryland":"MD","Massachusetts":"MA",
+    "Michigan":"MI","Minnesota":"MN","Mississippi":"MS","Missouri":"MO","Montana":"MT","Nebraska":"NE","Nevada":"NV",
+    "New Hampshire":"NH","New Jersey":"NJ","New Mexico":"NM","New York":"NY","North Carolina":"NC","North Dakota":"ND",
+    "Ohio":"OH","Oklahoma":"OK","Oregon":"OR","Pennsylvania":"PA","Rhode Island":"RI","South Carolina":"SC","South Dakota":"SD",
+    "Tennessee":"TN","Texas":"TX","Utah":"UT","Vermont":"VT","Virginia":"VA","Washington":"WA","West Virginia":"WV",
+    "Wisconsin":"WI","Wyoming":"WY"
+  };
+
+  const fmtCurrency = (n) => {
+    if (!isFinite(n)) return '—';
+    return n.toLocaleString(undefined, {style:'currency', currency:'USD', maximumFractionDigits:0});
+  };
+  const fmtCurrency2 = (n) => {
+    if (!isFinite(n)) return '—';
+    return n.toLocaleString(undefined, {style:'currency', currency:'USD', maximumFractionDigits:2});
+  };
+  const fmtPct = (n) => isFinite(n) ? (n*100).toFixed(1) + '%' : '—';
+
+  const norm = s => String(s ?? '').trim().toLowerCase();
+
+  function buildFieldMap(headers){
+    const map = {};
+    const H = headers.map(h => norm(h));
+    for (const [canonical, aliases] of Object.entries(FIELD_ALIASES)){
+      const idx = H.findIndex(h => aliases.includes(h));
+      if (idx >= 0) map[canonical] = headers[idx];
+    }
+    return map;
+  }
+
+  function parseDateFlex(v){
+    if (!v) return null;
+    if (v instanceof Date && !isNaN(v)) return v;
+    if (typeof v === 'number') {
+      const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+      return isNaN(d) ? null : d;
+    }
+    const s = String(v).trim();
+    const d = new Date(s);
+    if (!isNaN(d)) return d;
+    const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if (m){
+      const mm = +m[1]-1, dd = +m[2], yyyy = +m[3] < 100 ? 2000 + (+m[3]) : +m[3];
+      const d2 = new Date(yyyy, mm, dd);
+      return isNaN(d2) ? null : d2;
+    }
+    return null;
+  }
+
+  function groupBy(arr, keyFn){
+    const m = new Map();
+    for (const r of arr){
+      const k = keyFn(r);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(r);
+    }
+    return m;
+  }
+
+  function sum(arr, f){ let t=0; for (const x of arr) { const v = +f(x); if (isFinite(v)) t+=v; } return t; }
+
+  let rawData = [];
+  let field = {};
+  let filtered = [];
+
+  document.getElementById('fileInput').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      if (!Array.isArray(json)) throw new Error('JSON must be an array of records');
+      initWithData(json);
+    } catch (err){
+      alert('Failed to parse JSON: ' + err.message);
+    }
+  });
+
+  document.getElementById('loadSampleBtn').addEventListener('click', () => {
+    const sample = [
+      {"Order Date":"2019-01-05","Sales":261.96,"Profit":41.91,"Discount":0.0,"Category":"Furniture","Sub-Category":"Bookcases","Region":"West","State":"California","City":"Los Angeles","Customer Name":"Sean Miller","Segment":"Consumer"},
+      {"Order Date":"2019-02-17","Sales":731.94,"Profit":219.58,"Discount":0.0,"Category":"Technology","Sub-Category":"Phones","Region":"East","State":"New York","City":"New York City","Customer Name":"Sally Brown","Segment":"Corporate"},
+      {"Order Date":"2019-02-21","Sales":14.62,"Profit":6.87,"Discount":0.2,"Category":"Office Supplies","Sub-Category":"Labels","Region":"South","State":"Texas","City":"Dallas","Customer Name":"Robert Gray","Segment":"Home Office"},
+      {"Order Date":"2019-03-02","Sales":957.58,"Profit":-120.22,"Discount":0.4,"Category":"Furniture","Sub-Category":"Chairs","Region":"Central","State":"Illinois","City":"Chicago","Customer Name":"Jane Smith","Segment":"Consumer"},
+      {"Order Date":"2020-01-12","Sales":300.00,"Profit":90.00,"Discount":0.0,"Category":"Technology","Sub-Category":"Accessories","Region":"West","State":"Washington","City":"Seattle","Customer Name":"Adam Johnson","Segment":"Corporate"},
+      {"Order Date":"2020-04-18","Sales":120.49,"Profit":10.12,"Discount":0.15,"Category":"Office Supplies","Sub-Category":"Paper","Region":"West","State":"California","City":"San Francisco","Customer Name":"Sean Miller","Segment":"Consumer"},
+      {"Order Date":"2020-06-09","Sales":580.00,"Profit":130.50,"Discount":0.1,"Category":"Furniture","Sub-Category":"Tables","Region":"East","State":"Pennsylvania","City":"Philadelphia","Customer Name":"Chris Lee","Segment":"Home Office"},
+      {"Order Date":"2020-10-29","Sales":199.99,"Profit":55.00,"Discount":0.05,"Category":"Technology","Sub-Category":"Phones","Region":"East","State":"New Jersey","City":"Newark","Customer Name":"Sally Brown","Segment":"Corporate"},
+      {"Order Date":"2021-07-22","Sales":75.00,"Profit":-5.50,"Discount":0.25,"Category":"Office Supplies","Sub-Category":"Binders","Region":"South","State":"Florida","City":"Miami","Customer Name":"Amy Adams","Segment":"Consumer"}
+    ];
+    initWithData(sample);
+  });
+
+  function initWithData(rows){
+    rawData = rows;
+    if (!rows.length) {
+      alert('No rows found in JSON.');
+      return;
+    }
+    const headers = Object.keys(rows[0]);
+    field = buildFieldMap(headers);
+
+    const required = ['orderDate','sales','profit'];
+    const missing = required.filter(k => !field[k]);
+    if (missing.length){
+      alert('Missing fields: ' + missing.join(', ') + '. Please include at least Order Date, Sales, Profit.');
+    }
+
+    const normalized = rows.map(r => {
+      const d = parseDateFlex(r[field.orderDate] ?? r['Order Date']);
+      const sales = +r[field.sales];
+      const profit = +r[field.profit];
+      const discRaw = r[field.discount];
+      const discount = (typeof discRaw === 'string' && discRaw.trim().endsWith('%'))
+        ? parseFloat(discRaw) / 100
+        : +discRaw;
+      return {
+        orderDate: d,
+        year: d ? d.getFullYear() : null,
+        monthKey: d ? (d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0')) : null,
+        sales: isFinite(sales) ? sales : 0,
+        profit: isFinite(profit) ? profit : 0,
+        discount: isFinite(discount) ? discount : 0,
+        category: String(r[field.category] ?? ''),
+        subCategory: String(r[field.subCategory] ?? ''),
+        region: String(r[field.region] ?? ''),
+        state: String(r[field.state] ?? ''),
+        city: String(r[field.city] ?? ''),
+        customer: String(r[field.customer] ?? ''),
+        segment: String(r[field.segment] ?? ''),
+        orderId: r[field.orderId] ?? null
+      };
+    }).filter(r => r.orderDate);
+
+    rawData = normalized;
+    populateFilters(rawData);
+    filtered = rawData.slice();
+    renderAll();
+  }
+
+  function populateFilters(data){
+    const years = Array.from(new Set(data.map(r=>r.year).filter(Boolean))).sort((a,b)=>a-b);
+    const regions = Array.from(new Set(data.map(r=>r.region).filter(Boolean))).sort();
+    const categories = Array.from(new Set(data.map(r=>r.category).filter(Boolean))).sort();
+
+    const yearSel = document.getElementById('yearFilter');
+    const regionSel = document.getElementById('regionFilter');
+    const catSel = document.getElementById('categoryFilter');
+
+    yearSel.innerHTML = '<option value=\"\">Year: All</option>' + years.map(y=>`<option value=\"${y}\">${y}</option>`).join('');
+    regionSel.innerHTML = '<option value=\"\">Region: All</option>' + regions.map(v=>`<option>${v}</option>`).join('');
+    catSel.innerHTML = '<option value=\"\">Category: All</option>' + categories.map(v=>`<option>${v}</option>`).join('');
+
+    [yearSel, regionSel, catSel].forEach(el => el.onchange = applyFilters);
+    document.getElementById('resetBtn').onclick = () => {
+      yearSel.value = ''; regionSel.value = ''; catSel.value = '';
+      applyFilters();
+    };
+  }
+
+  function applyFilters(){
+    const y = document.getElementById('yearFilter').value;
+    const r = document.getElementById('regionFilter').value;
+    const c = document.getElementById('categoryFilter').value;
+
+    filtered = rawData.filter(row => {
+      if (y && String(row.year) !== String(y)) return false;
+      if (r && String(row.region) !== String(r)) return false;
+      if (c && String(row.category) !== String(c)) return false;
+      return true;
+    });
+
+    renderAll();
+  }
+
+  function renderAll(){
+    renderKPIs(filtered);
+    renderTimeSeries(filtered);
+    renderCategoryBars(filtered);
+    renderUSAMap(filtered);
+    renderPareto(filtered);
+    renderScatter(filtered);
+  }
+
+  function renderKPIs(data){
+    const totalSales = sum(data, d=>d.sales);
+    const totalProfit = sum(data, d=>d.profit);
+    const orders = new Set(data.map(d => d.orderId || (d.orderDate+'|'+d.customer))).size;
+    const margin = totalSales ? (totalProfit / totalSales) : 0;
+
+    document.getElementById('kpiSales').textContent = fmtCurrency(totalSales);
+    document.getElementById('kpiProfit').textContent = fmtCurrency(totalProfit);
+    document.getElementById('kpiMargin').textContent = fmtPct(margin);
+    document.getElementById('kpiOrders').textContent = isFinite(orders) ? orders.toLocaleString() : '—';
+  }
+
+  function renderTimeSeries(data){
+    const byMonth = groupBy(data.filter(d=>d.monthKey), d=>d.monthKey);
+    const months = Array.from(byMonth.keys()).sort();
+    const sales = months.map(k=>sum(byMonth.get(k), x=>x.sales));
+    const profit = months.map(k=>sum(byMonth.get(k), x=>x.profit));
+
+    const traces = [
+      {
+        x: months, y: sales, type:'scatter', mode:'lines+markers', name:'Sales',
+        hovertemplate:'%{x}<br>Sales: %{y:$,.0f}<extra></extra>'
+      },
+      {
+        x: months, y: profit, type:'scatter', mode:'lines+markers', name:'Profit',
+        yaxis:'y2',
+        hovertemplate:'%{x}<br>Profit: %{y:$,.0f}<extra></extra>'
+      }
+    ];
+    const layout = {
+      margin:{t:10,r:20,b:40,l:50},
+      xaxis:{tickangle:-30, showgrid:false},
+      yaxis:{title:'Sales', tickprefix:'$'},
+      yaxis2:{title:'Profit', overlaying:'y', side:'right', tickprefix:'$'},
+      paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
+      legend:{orientation:'h', y:1.2}
+    };
+    Plotly.react('timeSeries', traces, layout, {responsive:true, displayModeBar:false});
+  }
+
+  function renderCategoryBars(data){
+    const byCat = groupBy(data, d=>d.category||'(Uncategorized)');
+    const cats = Array.from(byCat.keys()).sort();
+    const catSales = cats.map(c=>sum(byCat.get(c), r=>r.sales));
+
+    const traceCat = {
+      x: catSales, y: cats, type:'bar', orientation:'h', name:'Category',
+      hovertemplate:'%{y}<br>Sales: %{x:$,.0f}<extra></extra>'
+    };
+
+    const subByCat = {};
+    for (const c of cats){
+      const subGroups = groupBy(byCat.get(c), r=>r.subCategory||'(Other)');
+      const subs = Array.from(subGroups.keys()).sort((a,b)=>{
+        const sa = sum(subGroups.get(a), r=>r.sales);
+        const sb = sum(subGroups.get(b), r=>r.sales);
+        return sb - sa;
+      });
+      subByCat[c] = {
+        x: subs.map(s=>sum(subGroups.get(s), r=>r.sales)),
+        y: subs
+      };
+    }
+
+    const layout = {
+      margin:{t:10,r:20,b:40,l:100},
+      paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
+      barmode:'stack'
+    };
+
+    Plotly.react('categoryBars', [traceCat], layout, {responsive:true, displayModeBar:false});
+
+    const el = document.getElementById('categoryBars');
+    el.on('plotly_click', (dataEvent) => {
+      const p = dataEvent.points?.[0];
+      if (!p) return;
+      const cat = p.y;
+      const sub = subByCat[cat];
+      if (!sub) return;
+
+      const subTrace = {
+        x: sub.x, y: sub.y, type:'bar', orientation:'h', name:`${cat} — Sub-Category`,
+        hovertemplate:'%{y}<br>Sales: %{x:$,.0f}<extra></extra>'
+      };
+
+      Plotly.react('categoryBars', [subTrace], {
+        ...layout, title:{text:`${cat} — Sub-Category`, x:0, xanchor:'left', font:{color:'#e5e7eb'}}
+      }, {responsive:true, displayModeBar:false});
+
+      el.oncontextmenu = (e)=>{ e.preventDefault(); Plotly.react('categoryBars', [traceCat], layout, {responsive:true}); };
+      el.ondblclick = ()=> Plotly.react('categoryBars', [traceCat], layout, {responsive:true});
+    });
+  }
+
+  function renderUSAMap(data){
+    const byState = groupBy(data.filter(d=>d.state), d=>d.state);
+    const states = [];
+    const zSales = [];
+    const hover = [];
+
+    for (const [stateName, rows] of byState.entries()){
+      const ab = STATE_ABBR[stateName];
+      if (!ab) continue;
+      const s = sum(rows, r=>r.sales);
+      const p = sum(rows, r=>r.profit);
+      const m = s ? p/s : 0;
+      states.push(ab);
+      zSales.push(s);
+      hover.push(`${stateName}<br>Sales: ${fmtCurrency2(s)}<br>Profit: ${fmtCurrency2(p)}<br>Margin: ${fmtPct(m)}`);
+    }
+
+    const trace = {
+      type: 'choropleth',
+      locationmode: 'USA-states',
+      locations: states,
+      z: zSales,
+      text: hover,
+      hoverinfo:'text',
+      colorbar: {title: 'Sales'},
+      marker: {line: {color: '#1f2937', width: 1}}
+    };
+
+    const layout = {
+      geo: {scope:'usa', showcountries:false, showlakes:false, lakecolor:'rgba(0,0,0,0)', bgcolor:'rgba(0,0,0,0)'},
+      margin:{t:0,r:0,b:0,l:0},
+      paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)'
+    };
+
+    Plotly.react('usaMap', [trace], layout, {responsive:true, displayModeBar:false});
+  }
+
+  function renderPareto(data){
+    const byCust = groupBy(data.filter(d=>d.customer), d=>d.customer);
+    const records = Array.from(byCust.entries()).map(([cust, rows]) => ({
+      customer: cust,
+      sales: sum(rows, r=>r.sales)
+    })).sort((a,b)=>b.sales - a.sales).slice(0, 20);
+
+    const labels = records.map(r=>r.customer);
+    const sales = records.map(r=>r.sales);
+    const total = sales.reduce((a,b)=>a+b,0);
+    let running = 0;
+    const cumPct = sales.map(v => { running += v; return running/total; });
+
+    const bar = {
+      x: labels, y: sales, type:'bar', name:'Sales',
+      hovertemplate:'%{x}<br>Sales: %{y:$,.0f}<extra></extra>'
+    };
+    const line = {
+      x: labels, y: cumPct, type:'scatter', mode:'lines+markers', name:'Cumulative %',
+      yaxis:'y2',
+      hovertemplate:'%{x}<br>Cumulative: %{y:.1%}<extra></extra>'
+    };
+
+    const layout = {
+      margin:{t:10,r:40,b:80,l:50},
+      xaxis:{tickangle:-30, automargin:true},
+      yaxis:{title:'Sales', tickprefix:'$'},
+      yaxis2:{title:'Cumulative %', overlaying:'y', side:'right', tickformat:'.0%'},
+      paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
+      legend:{orientation:'h', y:1.2}
+    };
+
+    Plotly.react('pareto', [bar, line], layout, {responsive:true, displayModeBar:false});
+  }
+
+  function renderScatter(data){
+    const x = [], y = [], size=[], text=[];
+    for (const r of data){
+      if (!isFinite(r.discount) || !isFinite(r.profit)) continue;
+      x.push(r.discount * 100);
+      y.push(r.profit);
+      size.push(Math.max(6, Math.sqrt(Math.max(0, r.sales))));
+      text.push(`${r.category} / ${r.subCategory}<br>Discount: ${(r.discount*100).toFixed(1)}%<br>Profit: ${fmtCurrency2(r.profit)}<br>Sales: ${fmtCurrency2(r.sales)}`);
+    }
+
+    const trace = {
+      x, y, mode:'markers', type:'scatter',
+      marker:{size, sizemode:'area', opacity:0.75},
+      hovertemplate:'%{text}<extra></extra>', text
+    };
+
+    const layout = {
+      margin:{t:10,r:20,b:50,l:60},
+      xaxis:{title:'Discount (%)'},
+      yaxis:{title:'Profit', tickprefix:'$'},
+      paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)'
+    };
+
+    Plotly.react('scatter', [trace], layout, {responsive:true, displayModeBar:false});
+  }
+})();
+</script>
+</body>
+</html>
